@@ -69,6 +69,35 @@ app.get('/get_datas', (req, res) => {
   })
 
 });
+async function send_push(title, message) {
+  try {
+      // Retrieve all subscriptions from MongoDB
+      const subscriptions = await getAllData('push');
+      
+      // Form payload for push notification
+      const payload = JSON.stringify({ title, message });
+
+      // Iterate through subscriptions and send push notification to each one
+      const notifications = subscriptions.map(subscription => {
+          return webPush.sendNotification(subscription.subscription, payload)
+              .catch(error => {
+                  console.error('Error sending notification:', error);
+                  return null; // Return null if there's an error in sending notification
+              });
+      });
+
+      // Wait for all notifications to be sent
+      await Promise.all(notifications);
+
+      console.log('Notifications sent successfully.');
+  } catch (error) {
+      console.error('Error sending notifications:', error);
+      throw error;
+  }
+}
+
+
+
 
 
 
@@ -84,13 +113,12 @@ app.post('/post_data', async (req, res) => {
   // Отправляем ответ клиенту сразу, чтобы подтвердить получение данных
   res.status(200).send("Data received");
 
-  // После этого добавляем данные в базу данных
   try {
     await push_db(req.body, posts);
+    send_push("Do you want to see a new post?",`User ${req.body.nick} added a new post`)
     console.log('Data added to database successfully');
   } catch (error) {
     console.error('Error while adding data to database:', error);
-    // Если произошла ошибка при добавлении данных в базу данных, вы можете отправить соответствующий ответ клиенту
     res.status(500).send("Error occurred while adding data to database");
   }
 });
@@ -135,42 +163,54 @@ webPush.setVapidDetails(
 // Инициализация объекта для хранения подписок
 let subscriptions = {}
 
-// Роут для подписки на push-уведомления
-app.get('/sub', (req, res) => {
-  // Извлекаем подписку и ID из запроса
-  const sub = req.body;
-  return res.status(201).json({js:sub});
-});
-// Роут для подписки на push-уведомления 
-app.post('/subscribe', (req, res) => {
-    // Извлекаем подписку и ID из запроса
-    const {subscription, id} = req.body;
-    // Сохраняем подписку в объекте под ключом ID
-    subscriptions[id] = subscription;
-    // Возвращаем успешный статус
-    console.log(subscriptions)
-    return res.status(201).json({data: {success: true}});
-});
 
-// Роут для отправки push-уведомлений
-app.post('/send', (req, res) => {
-    // Извлекаем сообщение, заголовок и ID из запроса
-    const {message, title, id} = req.body;
-    // Находим подписку по ID
-    const subscription = subscriptions[id];
-    // Формируем payload для push-уведомления
-    const payload = JSON.stringify({ title, message });
-    
-    // Отправляем push-уведомление
-    webPush.sendNotification(subscription, payload)
-    .catch(error => {
-        // В случае ошибки возвращаем статус 400
-        return res.status(400).json({data: {success: false}});
-    })
-    .then((value) => {
-        // В случае успешной отправки возвращаем статус 201
-        return res.status(201).json({data: {success: true}});
-    });
+
+app.post('/subscribe', async (req, res) => {
+  // Extract subscription and ID from the request body
+  const { subscription, id } = req.body;
+  
+  try {
+      // Save the subscription to MongoDB
+      await push_db({ id, subscription }, 'push'); // Assuming collection name is 'subscriptions'
+      
+      // Respond with success status
+      return res.status(201).json({ data: { success: true } });
+  } catch (error) {
+      console.error('Error saving subscription to MongoDB:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+app.post('/send', async (req, res) => {
+  // Extract message, title, and ID from the request body
+  const { message, title, id } = req.body;
+
+  try {
+      // Retrieve subscription from MongoDB based on ID
+      const subscriptions = await getAllData('push');
+      const subscription = subscriptions.find(sub => sub.id === id);
+
+      if (!subscription) {
+          return res.status(404).json({ error: 'Subscription not found' });
+      }
+
+      // Form payload for push notification
+      const payload = JSON.stringify({ title, message });
+
+      // Send push notification
+      webPush.sendNotification(subscription.subscription, payload)
+          .then(() => {
+              // If notification sent successfully, return success status
+              return res.status(201).json({ data: { success: true } });
+          })
+          .catch(error => {
+              // If there's an error in sending the notification, return error status
+              console.error('Error sending notification:', error);
+              return res.status(400).json({ error: 'Failed to send notification' });
+          });
+  } catch (error) {
+      console.error('Error processing request:', error);
+      return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 //bot.on('text', async msg => {
