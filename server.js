@@ -167,11 +167,11 @@ let subscriptions = {}
 
 app.post('/subscribe', async (req, res) => {
   // Extract subscription and ID from the request body
-  const { subscription, id } = req.body;
+  const { subscription, id,nick } = req.body;
   
   try {
       // Save the subscription to MongoDB
-      await push_db({ id, subscription }, 'push'); // Assuming collection name is 'subscriptions'
+      await push_db({ id, subscription, nick}, 'push'); // Assuming collection name is 'subscriptions'
       
       // Respond with success status
       return res.status(201).json({ data: { success: true } });
